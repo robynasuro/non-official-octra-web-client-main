@@ -21,7 +21,7 @@ Or, you can deploy it directly to Vercel:
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fdefi-failure%2Fnon-official-octra-web-client)
 
 
-Or, use the deployed client [here](https://3000-robynasuro-nonofficialo-hep2aemfyj3.ws-us120.gitpod.io/).
+Or, use the deployed client [here](https://non-official-octra-web-client-main.vercel.app/).
 
 
 ## TODO
