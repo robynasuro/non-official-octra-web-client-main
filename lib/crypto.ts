@@ -2,7 +2,7 @@ import { sign, SignKeyPair } from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import base58 from 'bs58';
 import { createHash, randomBytes, createHmac } from 'crypto';
-import { entropyToMnemonic, mnemonicToSeedSync } from "bip39";
+import { entropyToMnemonic, mnemonicToSeedSync, validateMnemonic } from "bip39";
 
 /**
  * Validates a private key.
@@ -52,10 +52,25 @@ export function derivePublicKey(privateKeyB64: string): string {
 export function deriveAddress(privateKeyB64: string): string {
   const keyPair = getKeyPair(privateKeyB64);
   const hash: Buffer = createHash("sha256").update(keyPair.publicKey).digest();
-  const base58Hash: string = base58.encode((hash))
+  const base58Hash: string = base58.encode(hash);
   return 'oct' + base58Hash;
 }
 
+/**
+ * Derives a private key from a mnemonic phrase.
+ * @param {string} mnemonic - The mnemonic phrase (space-separated words).
+ * @returns {string} The Base64 encoded private key.
+ */
+export function derivePrivateKeyFromMnemonic(mnemonic: string): string {
+  if (!validateMnemonic(mnemonic)) {
+    throw new Error('Mnemonic phrase tidak valid');
+  }
+  const seed: Buffer = mnemonicToSeedSync(mnemonic);
+  const { masterPrivateKey }: MasterKey = deriveMasterKey(seed);
+  const keyPair = sign.keyPair.fromSeed(masterPrivateKey);
+  const privateKeyRaw: Buffer = Buffer.from(keyPair.secretKey.slice(0, 32));
+  return encodeBase64(privateKeyRaw);
+}
 
 // Below was taken from the official wallet gen with minor modifications
 // Source: https://github.com/octra-labs/wallet-gen/blob/11de6a6bbfcced5e2433e4b1b938adc39dd20caa/wallet_generator.ts
@@ -120,35 +135,22 @@ function bufferToHex(buffer: Buffer | Uint8Array): string {
  */
 export function createWallet(): WalletData {
   const entropy: Buffer = generateEntropy(128);
-  const mnemonic: string = entropyToMnemonic(
-    entropy.toString("hex")
-  );
+  const mnemonic: string = entropyToMnemonic(entropy.toString("hex"));
   const mnemonicWords: string[] = mnemonic.split(" ");
   const seed: Buffer = mnemonicToSeedSync(mnemonic);
-  const { masterPrivateKey, masterChainCode }: MasterKey =
-    deriveMasterKey(seed);
+  const { masterPrivateKey, masterChainCode }: MasterKey = deriveMasterKey(seed);
   const keyPair = sign.keyPair.fromSeed(masterPrivateKey);
-  const privateKeyRaw: Buffer = Buffer.from(
-    keyPair.secretKey.slice(0, 32)
-  );
+  const privateKeyRaw: Buffer = Buffer.from(keyPair.secretKey.slice(0, 32));
   const publicKeyRaw: Buffer = Buffer.from(keyPair.publicKey);
   const address: string = createOctraAddress(publicKeyRaw);
 
-  const testMessage: string =
-    '{"from":"test","to":"test","amount":"1000000","nonce":1}';
+  const testMessage: string = '{"from":"test","to":"test","amount":"1000000","nonce":1}';
   const messageBytes: Buffer = Buffer.from(testMessage, "utf8");
-  const signature: Uint8Array = sign.detached(
-    messageBytes,
-    keyPair.secretKey
-  );
+  const signature: Uint8Array = sign.detached(messageBytes, keyPair.secretKey);
   const signatureB64: string = encodeBase64(signature);
 
   let signatureValid: boolean = false;
-  signatureValid = sign.detached.verify(
-      messageBytes,
-      signature,
-      keyPair.publicKey
-  );
+  signatureValid = sign.detached.verify(messageBytes, signature, keyPair.publicKey);
 
   return {
     mnemonic: mnemonicWords,
@@ -164,5 +166,4 @@ export function createWallet(): WalletData {
     test_signature: signatureB64,
     signature_valid: signatureValid,
   };
-
 }
