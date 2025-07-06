@@ -17,33 +17,41 @@ import { Label } from "@/components/ui/label";
 import { LockKeyhole, Wallet, Loader2, AlertCircle, CircleAlert, Download } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import Link from "next/link";
-import { createWallet, WalletData } from "@/lib/crypto";
+import { createWallet, WalletData, derivePrivateKeyFromMnemonic } from "@/lib/crypto";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export function WalletSetup() {
-  const {login} = useWallet();
+  const { login } = useWallet();
   const [privateKey, setPrivateKey] = useState("");
+  const [mnemonic, setMnemonic] = useState("");
   const [error, setError] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [newWallet, setNewWallet] = useState<WalletData | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("private-key");
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
   };
 
   const handleConnect = () => {
-    if (!privateKey) {
-      setError("Private key cannot be empty.");
-      return;
-    }
     setError("");
     setIsConnecting(true);
     try {
-      // The login function from the context handles validation and state update
-      login(privateKey);
-      // On success, the main page will automatically switch to the dashboard
+      if (activeTab === "private-key") {
+        if (!privateKey) {
+          throw new Error("Private key cannot be empty.");
+        }
+        login(privateKey);
+      } else {
+        if (!mnemonic) {
+          throw new Error("Mnemonic phrase cannot be empty.");
+        }
+        const derivedPrivateKey = derivePrivateKeyFromMnemonic(mnemonic.trim());
+        login(derivedPrivateKey);
+      }
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -63,21 +71,19 @@ export function WalletSetup() {
     } finally {
       setIsCreating(false);
     }
-  }
+  };
 
   const handleDownloadWallet = () => {
     if (!newWallet) return;
 
-    const data = newWallet
+    const data = newWallet;
     const timestamp: number = Math.floor(Date.now() / 1000);
-    const filename: string = `octra_wallet_${data.address.slice(
-      -8
-    )}_${timestamp}.txt`;
+    const filename: string = `octra_wallet_${data.address.slice(-8)}_${timestamp}.txt`;
 
     const content: string = `OCTRA WALLET
 ${"=".repeat(50)}
 
-SECURITY WARNING: KEEP THIS FILE SECURE AND NEVER SHARE YOUR PRIVATE KEY
+SECURITY WARNING: KEEP THIS FILE SECURE AND NEVER SHARE YOUR PRIVATE KEY OR MNEMONIC
 
 Generated: ${new Date().toISOString().replace("T", " ").slice(0, 19)}
 Address Format: oct + Base58(SHA256(pubkey))
@@ -89,11 +95,16 @@ Address: ${data.address}
 
 Technical Details:
 Entropy: ${data.entropy_hex}
+Seed: ${data.seed_hex}
+Master Chain Code: ${data.master_chain_hex}
 Signature Algorithm: Ed25519
 Derivation: BIP39-compatible (PBKDF2-HMAC-SHA512, 2048 iterations)
+Test Message: ${data.test_message}
+Test Signature: ${data.test_signature}
+Signature Valid: ${data.signature_valid}
 `;
 
-    const blob = new Blob([content], {type: "application/json"});
+    const blob = new Blob([content], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -104,49 +115,61 @@ Derivation: BIP39-compatible (PBKDF2-HMAC-SHA512, 2048 iterations)
     URL.revokeObjectURL(url);
   };
 
-
   return (
     <>
       <div className="flex items-center justify-center min-h-screen">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <div className="flex justify-center mb-4">
-              <Wallet size={48} className="text-primary"/>
+              <Wallet size={48} className="text-primary" />
             </div>
             <CardTitle>Octra Web Client</CardTitle>
-            <CardDescription>Enter your private key to connect your wallet</CardDescription>
+            <CardDescription>Connect your wallet using a private key or mnemonic phrase</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="private-key">Private Key</Label>
-              <Input
-                id="private-key"
-                type="password"
-                placeholder="Your secret key"
-                value={privateKey}
-                onChange={(e) => setPrivateKey(e.target.value)}
-                disabled={isConnecting || isCreating}
-              />
-            </div>
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="private-key">Private Key</TabsTrigger>
+                <TabsTrigger value="mnemonic">Mnemonic</TabsTrigger>
+              </TabsList>
+              <TabsContent value="private-key" className="space-y-2">
+                <Label htmlFor="private-key">Private Key</Label>
+                <Input
+                  id="private-key"
+                  type="password"
+                  placeholder="Enter your Base64 private key"
+                  value={privateKey}
+                  onChange={(e) => setPrivateKey(e.target.value)}
+                  disabled={isConnecting || isCreating}
+                />
+              </TabsContent>
+              <TabsContent value="mnemonic" className="space-y-2">
+                <Label htmlFor="mnemonic">Mnemonic Phrase</Label>
+                <Input
+                  id="mnemonic"
+                  type="text"
+                  placeholder="Enter your 12-word mnemonic phrase"
+                  value={mnemonic}
+                  onChange={(e) => setMnemonic(e.target.value)}
+                  disabled={isConnecting || isCreating}
+                />
+              </TabsContent>
+            </Tabs>
             {error && (
               <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4"/>
+                <AlertCircle className="h-4 w-4" />
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
             <div className="flex items-center p-3 space-x-2 text-sm rounded-md bg-muted text-muted-foreground">
-              <LockKeyhole className="w-5 h-5 mt-0.5 flex-shrink-0"/>
-              <p>Your key is stored securely in your browser&apos;s local storage and never sent to any server.</p>
+              <LockKeyhole className="w-5 h-5 mt-0.5 flex-shrink-0" />
+              <p>Your private key and mnemonic are stored securely in your browser's local storage and never sent to any server.</p>
             </div>
-            <div className="flex items-center  p-3 space-x-2 text-sm rounded-md bg-muted text-muted-foreground">
-              <CircleAlert className="w-5 h-5 mt-0.5 flex-shrink-0"/>
+            <div className="flex items-center p-3 space-x-2 text-sm rounded-md bg-muted text-muted-foreground">
+              <CircleAlert className="w-5 h-5 mt-0.5 flex-shrink-0" />
               <div>
                 <p><strong>Note:</strong> This is <strong>NOT</strong> an official client.</p>
-                <p>The code is open source and available <Link
-                  className="underline"
-                  rel="noopener noreferrer" target="_blank"
-                  href="#"
-                >here</Link>. <strong>DYOR</strong></p>
+                <p>The code is open source and available <Link className="underline" rel="noopener noreferrer" target="_blank" href="#">here</Link>. <strong>DYOR</strong></p>
               </div>
             </div>
           </CardContent>
@@ -154,21 +177,19 @@ Derivation: BIP39-compatible (PBKDF2-HMAC-SHA512, 2048 iterations)
             <div className="flex flex-col gap-2 w-full">
               <Button className="w-full" onClick={handleConnect} disabled={isConnecting || isCreating}>
                 {isConnecting ? (
-                  <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Connecting...</>
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Connecting...</>
                 ) : (
                   "Connect Wallet"
                 )}
               </Button>
-              <Button className="w-full" variant="secondary" onClick={handleCreate}
-                      disabled={isConnecting || isCreating}>
+              <Button className="w-full" variant="secondary" onClick={handleCreate} disabled={isConnecting || isCreating}>
                 {isCreating ? (
-                  <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Creating...</>
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating...</>
                 ) : (
                   "Create New Wallet"
                 )}
               </Button>
             </div>
-
           </CardFooter>
         </Card>
       </div>
@@ -178,11 +199,28 @@ Derivation: BIP39-compatible (PBKDF2-HMAC-SHA512, 2048 iterations)
           <DialogHeader>
             <DialogTitle>Wallet Created Successfully</DialogTitle>
             <DialogDescription>
-              Your new wallet has been created. Please save your private key securely.
-              <strong> You will not be able to recover it if you lose it.</strong>
+              Your new wallet has been created. Please save your mnemonic phrase and private key securely.
+              <strong> You will not be able to recover them if you lose them.</strong>
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="new-mnemonic">Mnemonic Phrase</Label>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Input
+                      id="new-mnemonic"
+                      className="cursor-pointer"
+                      readOnly
+                      onClick={() => handleCopy(newWallet?.mnemonic.join(" ") || "")}
+                      value={newWallet?.mnemonic.join(" ") || ""}
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent><p>Click to copy</p></TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="new-address">Wallet Address</Label>
               <TooltipProvider>
@@ -201,7 +239,7 @@ Derivation: BIP39-compatible (PBKDF2-HMAC-SHA512, 2048 iterations)
               </TooltipProvider>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="new-private-key">Your Private Key</Label>
+              <Label htmlFor="new-private-key">Private Key</Label>
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -219,16 +257,15 @@ Derivation: BIP39-compatible (PBKDF2-HMAC-SHA512, 2048 iterations)
               </TooltipProvider>
             </div>
             <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4"/>
+              <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                <strong>Important:</strong> Do not share this private key with anyone. Store it in a safe and secure
-                place.
+                <strong>Important:</strong> Do not share your mnemonic phrase or private key with anyone. Store them in a safe and secure place.
               </AlertDescription>
             </Alert>
           </div>
           <DialogFooter>
             <Button type="button" className="w-full" onClick={handleDownloadWallet}>
-              <Download className="mr-2 h-4 w-4"/>
+              <Download className="mr-2 h-4 w-4" />
               Download Wallet File
             </Button>
           </DialogFooter>
