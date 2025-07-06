@@ -77,7 +77,6 @@ export function HistoryTable() {
                   </TableRow>
                 )}
                 {history.map((tx, index) => (
-
                   <TableRow
                     key={tx.hash || index}
                   >
@@ -89,7 +88,7 @@ export function HistoryTable() {
                           <ArrowUpRight className="h-4 w-4 text-red-500"/>
                         )}
                         <span className="capitalize text-sm font-medium">
-                          {tx.type === 'in' ? 'RECV' : 'SENT'}
+                          {tx.type === 'in' ? 'RECV' : tx.message ? 'SENT (MSG)' : 'SENT'}
                         </span>
                       </div>
                     </TableCell>
@@ -110,8 +109,8 @@ export function HistoryTable() {
                             }
                           }}
                         >
-                        {formatAddress(tx.to)}
-                      </span>
+                          {formatAddress(tx.to)}
+                        </span>
                         <TooltipProvider>
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -122,7 +121,6 @@ export function HistoryTable() {
                           </Tooltip>
                         </TooltipProvider>
                       </div>
-
                     </TableCell>
                     <TableCell>
                       <span className="text-sm text-muted-foreground">

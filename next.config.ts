@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  reactStrictMode: true, // Optional: buat mode strict React
+  // Hapus experimental.instrumentationHook karena udah gak perlu
 };
 
 export default nextConfig;

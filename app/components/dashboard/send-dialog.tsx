@@ -23,6 +23,7 @@ interface SendDialogProps {
 interface Recipient {
   address: string;
   amount: string;
+  message?: string;
 }
 
 interface SendResult {
@@ -30,27 +31,31 @@ interface SendResult {
   result: PromiseSettledResult<any>;
 }
 
-export function SendDialog({children}: SendDialogProps) {
+export function SendDialog({ children }: SendDialogProps) {
   const [open, setOpen] = useState(false);
-  const [recipients, setRecipients] = useState<Recipient[]>([{address: "", amount: ""}]);
+  const [recipients, setRecipients] = useState<Recipient[]>([{ address: "", amount: "", message: "" }]);
   const [step, setStep] = useState<'form' | 'confirm' | 'sending' | 'result'>('form');
   const [results, setResults] = useState<SendResult[]>([]);
-  const [progress, setProgress] = useState({sent: 0, total: 0});
+  const [progress, setProgress] = useState({ sent: 0, total: 0 });
   const [inputMode, setInputMode] = useState<'manual' | 'batch'>('manual');
   const [batchText, setBatchText] = useState('');
+  const [batchAmount, setBatchAmount] = useState('');
+  const [batchMessage, setBatchMessage] = useState('');
 
-  const {balance, nonce, isLoading: balanceLoading} = useWalletBalance();
-  const {sendTransaction, isLoading: isSending} = useSendTransaction();
+  const { balance, nonce, isLoading: balanceLoading } = useWalletBalance();
+  const { sendTransaction, isLoading: isSending } = useSendTransaction();
 
   const addressRegex = /^oct[1-9A-HJ-NP-Za-km-z]{44}$/;
 
   const resetDialog = () => {
-    setRecipients([{address: "", amount: ""}]);
+    setRecipients([{ address: "", amount: "", message: "" }]);
     setStep('form');
     setResults([]);
-    setProgress({sent: 0, total: 0});
+    setProgress({ sent: 0, total: 0 });
     setInputMode('manual');
     setBatchText('');
+    setBatchAmount('');
+    setBatchMessage('');
   };
 
   const handleOpenChange = (newOpen: boolean) => {
@@ -67,7 +72,7 @@ export function SendDialog({children}: SendDialogProps) {
   };
 
   const addRecipient = () => {
-    setRecipients([...recipients, {address: "", amount: ""}]);
+    setRecipients([...recipients, { address: "", amount: recipients[0].amount || "", message: recipients[0].message || "" }]);
   };
 
   const removeRecipient = (index: number) => {
@@ -77,28 +82,20 @@ export function SendDialog({children}: SendDialogProps) {
     }
   };
 
-  const parseBatchText = (text: string): Recipient[] => {
+  const parseBatchText = (text: string): string[] => {
     const lines = text.trim().split('\n').filter(line => line.trim() !== '');
-    const parsed: Recipient[] = [];
-
-    for (const line of lines) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length >= 2) {
-        const address = parts[0];
-        const amount = parts[1];
-        parsed.push({ address, amount });
-      }
-    }
-
-    return parsed;
+    return lines.filter(line => addressRegex.test(line));
   };
 
   const handleBatchImport = () => {
-    const parsedRecipients = parseBatchText(batchText);
-    if (parsedRecipients.length > 0) {
-      setRecipients(parsedRecipients);
+    const parsedAddresses = parseBatchText(batchText);
+    if (parsedAddresses.length > 0) {
+      const newRecipients = parsedAddresses.map(address => ({ address, amount: batchAmount, message: batchMessage }));
+      setRecipients(newRecipients);
       setInputMode('manual');
       setBatchText('');
+      setBatchAmount('');
+      setBatchMessage('');
     }
   };
 
@@ -106,6 +103,8 @@ export function SendDialog({children}: SendDialogProps) {
     setInputMode(mode);
     if (mode === 'batch') {
       setBatchText('');
+      setBatchAmount('');
+      setBatchMessage('');
     }
   };
 
@@ -136,7 +135,7 @@ export function SendDialog({children}: SendDialogProps) {
   const handleNext = () => {
     const error = validateForm();
     if (error) {
-      alert(error); // Consider using a toast/notification system
+      alert(error);
       return;
     }
     setStep('confirm');
@@ -147,10 +146,8 @@ export function SendDialog({children}: SendDialogProps) {
     const allExecutedResults: SendResult[] = [];
     const startNonce = nonce !== undefined ? nonce + 1 : 0;
 
-    // Set total for progress indicator
-    setProgress({sent: 0, total: recipients.length});
+    setProgress({ sent: 0, total: recipients.length });
 
-    // 1. Batching Logic (same as cli.py)
     const BATCH_SIZE = 5;
     const batches: Recipient[][] = [];
     for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
@@ -159,20 +156,18 @@ export function SendDialog({children}: SendDialogProps) {
 
     let overallIndex = 0;
     for (const batch of batches) {
-      // 2. Pre-calculate nonces and create transaction promises for the current batch
       const transactionPromises = batch.map((recipient, batchIndex) => {
         const transactionNonce = startNonce + overallIndex + batchIndex;
         return sendTransaction({
           to: recipient.address,
           amount: parseFloat(recipient.amount),
-          _nonce: transactionNonce, // Use pre-calculated nonce
+          _nonce: transactionNonce,
+          message: recipient.message || undefined,
         });
       });
 
-      // 3. Parallel Execution (using Promise.allSettled to mimic asyncio.gather)
       const batchResults = await Promise.allSettled(transactionPromises);
 
-      // Map results back to recipients
       const executedResultsInBatch = batch.map((recipient, index) => ({
         recipient,
         result: batchResults[index],
@@ -180,8 +175,7 @@ export function SendDialog({children}: SendDialogProps) {
 
       allExecutedResults.push(...executedResultsInBatch);
 
-      // Update progress
-      setProgress(prev => ({...prev, sent: prev.sent + batch.length}));
+      setProgress(prev => ({ ...prev, sent: prev.sent + batch.length }));
 
       overallIndex += batch.length;
     }
@@ -201,7 +195,6 @@ export function SendDialog({children}: SendDialogProps) {
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="w-full max-w-xl max-h-[90vh] flex flex-col">
 
-        {/* FORM STEP */}
         {step === 'form' && (
           <>
             <DialogHeader className="flex-shrink-0">
@@ -210,7 +203,6 @@ export function SendDialog({children}: SendDialogProps) {
             </DialogHeader>
 
             <div className="flex flex-col flex-1 min-h-0 gap-4">
-              {/* Input Mode Toggle */}
               <div className="flex-shrink-0 flex gap-2 p-2 rounded-md">
                 <Button
                   variant={inputMode === 'manual' ? 'default' : 'outline'}
@@ -256,6 +248,16 @@ export function SendDialog({children}: SendDialogProps) {
                             onChange={(e) => handleRecipientChange(index, 'amount', e.target.value)}
                             step="0.000001"
                             min="0"
+                            className="appearance-textfield [&::-webkit-inner-spin-button]:hidden [&::-webkit-outer-spin-button]:hidden"
+                          />
+                        </div>
+                        <div className="col-span-12">
+                          <Label htmlFor={`message-${index}`}>Message (Optional)</Label>
+                          <Textarea
+                            id={`message-${index}`}
+                            placeholder="Add a note (max 1024 chars)"
+                            value={recipient.message || ''}
+                            onChange={(e) => handleRecipientChange(index, 'message', e.target.value.slice(0, 1024))}
                           />
                         </div>
                         {recipients.length > 1 && (
@@ -276,25 +278,48 @@ export function SendDialog({children}: SendDialogProps) {
               ) : (
                 <div className="flex flex-col gap-3">
                   <div>
-                    <Label htmlFor="batch-input">Batch Import</Label>
+                    <Label htmlFor="batch-input">Batch Addresses</Label>
                     <div className="text-xs text-gray-500 mb-2">
-                      Enter one recipient per line in format: address amount
+                      Enter one address per line
                     </div>
                     <Textarea
                       id="batch-input"
-                      placeholder="oct1abc...def 10.5"
+                      placeholder="oct1abc...def"
                       value={batchText}
                       onChange={(e) => setBatchText(e.target.value)}
-                      rows={10}
+                      rows={8}
                       className="font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="batch-amount">Amount (for all addresses)</Label>
+                    <Input
+                      id="batch-amount"
+                      type="number"
+                      placeholder="0.0"
+                      value={batchAmount}
+                      onChange={(e) => setBatchAmount(e.target.value)}
+                      step="0.000001"
+                      min="0"
+                      className="appearance-textfield [&::-webkit-inner-spin-button]:hidden [&::-webkit-outer-spin-button]:hidden"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="batch-message">Message (Optional)</Label>
+                    <Textarea
+                      id="batch-message"
+                      placeholder="Add a note (max 1024 chars)"
+                      value={batchMessage}
+                      onChange={(e) => setBatchMessage(e.target.value.slice(0, 1024))}
+                      rows={4}
                     />
                   </div>
                   <Button
                     onClick={handleBatchImport}
-                    disabled={!batchText.trim()}
+                    disabled={!batchText.trim() || !batchAmount}
                     className="w-full"
                   >
-                    Import {parseBatchText(batchText).length} Recipients
+                    Import {parseBatchText(batchText).length} Addresses
                   </Button>
                 </div>
               )}
@@ -325,13 +350,11 @@ export function SendDialog({children}: SendDialogProps) {
           </>
         )}
 
-        {/* CONFIRM STEP */}
         {step === 'confirm' && (
           <>
             <DialogHeader className="flex-shrink-0">
               <DialogTitle>Confirm Transactions</DialogTitle>
-              <DialogDescription>Review the {recipients.length} transaction(s) below. They will be sent in parallel
-                batches.</DialogDescription>
+              <DialogDescription>Review the {recipients.length} transaction(s) below. They will be sent in parallel batches.</DialogDescription>
             </DialogHeader>
 
             <div className="flex-1 min-h-0">
@@ -347,13 +370,18 @@ export function SendDialog({children}: SendDialogProps) {
                         <span className="text-sm text-gray-600">Amount:</span>
                         <span className="text-sm font-semibold text-green-600">{parseFloat(r.amount).toFixed(6)} OCT</span>
                       </div>
+                      {r.message && (
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Message:</span>
+                          <span className="text-xs break-all">{r.message}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between">
                         <span className="text-sm text-gray-600">Nonce:</span>
                         <span className="text-sm font-semibold">{nonce !== undefined ? nonce + 1 + i : '---'}</span>
                       </div>
                     </div>
                   ))}
-
                 </div>
                 <ScrollBar orientation="vertical"/>
               </ScrollArea>
@@ -378,13 +406,11 @@ export function SendDialog({children}: SendDialogProps) {
           </>
         )}
 
-        {/* SENDING STEP */}
         {step === 'sending' && (
           <div className="flex flex-col h-full">
             <DialogHeader className="flex-shrink-0">
               <DialogTitle>Sending Transactions in Parallel...</DialogTitle>
-              <DialogDescription>Processing batch of {recipients.length} transaction(s). Please
-                wait...</DialogDescription>
+              <DialogDescription>Processing batch of {recipients.length} transaction(s). Please wait...</DialogDescription>
             </DialogHeader>
             <div className="flex-1 flex flex-col items-center justify-center">
               <Loader2 className="h-8 w-8 animate-spin text-blue-500"/>
@@ -393,37 +419,36 @@ export function SendDialog({children}: SendDialogProps) {
           </div>
         )}
 
-        {/* RESULT STEP */}
         {step === 'result' && (
           <>
             <DialogHeader className="flex-shrink-0">
               <DialogTitle>Batch Send Complete</DialogTitle>
-              <DialogDescription>{results.filter(r => r.result.status === 'fulfilled' && r.result.value.success).length} of {recipients.length} transactions
-                sent successfully.</DialogDescription>
+              <DialogDescription>{results.filter(r => r.result.status === 'fulfilled' && r.result.value.success).length} of {recipients.length} transactions sent successfully.</DialogDescription>
             </DialogHeader>
 
             <div className="flex-1 min-h-0 my-4">
               <ScrollArea className="h-[400px] border rounded-md">
                 <div className="space-y-4 pr-4">
-                  {results.map(({recipient, result}, index) => {
+                  {results.map(({ recipient, result }, index) => {
                     const isSuccess = result.status === 'fulfilled' && result.value.success;
                     const txResult = result.status === 'fulfilled' ? result.value : null;
                     const errorReason = result.status === 'rejected' ? result.reason.message : txResult?.error;
                     return (
                       <div key={index} className="p-3 border rounded-md">
                         <div className="flex items-center mb-2 font-semibold">
-                          {isSuccess ?
-                            <CheckCircle className="h-5 w-5 mr-2 text-green-600"/> :
-                            <XCircle className="h-5 w-5 mr-2 text-red-600"/>}
+                          {isSuccess ? <CheckCircle className="h-5 w-5 mr-2 text-green-600"/> : <XCircle className="h-5 w-5 mr-2 text-red-600"/>}
                           <span>To: <span className="font-mono text-xs">{`${recipient.address.substring(0, 10)}...`}</span></span>
                         </div>
                         {isSuccess ? (
                           <>
                             {txResult?.txHash && (
                               <div className="text-xs font-mono p-2 rounded break-all underline cursor-pointer"
-                                   onClick={() => window.open(`https://octrascan.io/tx/${txResult.txHash}`, '_blank', 'noopener,noreferrer')}>
+                                    onClick={() => window.open(`https://octrascan.io/tx/${txResult.txHash}`, '_blank', 'noopener,noreferrer')}>
                                 {txResult.txHash}
                               </div>
+                            )}
+                            {recipient.message && (
+                              <div className="text-sm break-all">Message: {recipient.message}</div>
                             )}
                           </>
                         ) : (

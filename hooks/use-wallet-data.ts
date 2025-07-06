@@ -10,7 +10,7 @@ import { useMemo } from "react";
 // A single hook to fetch balance and nonce, mimicking cli.py's st()
 export function useWalletBalance() {
   const { wallet } = useWallet();
-  const rpcUrl = 'https://octra.network'; // Or get from a config
+  const rpcUrl = 'https://octra.network';
 
   const balanceKey = wallet ? [`/balance/${wallet.address}`, rpcUrl] : null;
   const { data: balanceData, error: balanceError, isLoading: balanceLoading } = useSWR(
@@ -30,7 +30,6 @@ export function useWalletBalance() {
     }
   );
 
-  // Combine nonce from balance and staging, similar to cli.py
   const getCombinedNonce = () => {
     if (!wallet || !balanceData) {
       return balanceData?.nonce;
@@ -58,7 +57,6 @@ export function useWalletBalance() {
   };
 }
 
-
 interface TransactionReference {
   hash: string;
   epoch?: number;
@@ -71,6 +69,7 @@ interface ParsedTransaction {
   amount_raw?: string;
   nonce: number;
   timestamp: number;
+  message?: string; // Tambahin field message sebagai optional
 }
 
 export interface ProcessedTransaction {
@@ -82,13 +81,13 @@ export interface ProcessedTransaction {
   nonce: number;
   epoch?: number;
   ok: boolean;
+  message?: string;
 }
 
 export function useTransactionHistory() {
   const { wallet } = useWallet();
   const rpcUrl = 'https://octra.network';
 
-  // Fetch pending (staged) transactions
   const stagingKey = wallet ? ['/staging', rpcUrl] : null;
   const { data: stagingData } = useSWR(
     stagingKey,
@@ -99,7 +98,6 @@ export function useTransactionHistory() {
     }
   );
 
-  // Fetch confirmed transaction references (list of hashes)
   const addressKey = wallet ? [`/address/${wallet.address}?limit=20`, rpcUrl] : null;
   const { data: addressData, error: addressError, isLoading: addressLoading } = useSWR(
     addressKey,
@@ -110,10 +108,8 @@ export function useTransactionHistory() {
     }
   );
 
-  // Extract transaction hashes from the address data
   const transactionHashes = addressData?.recent_transactions?.map((tx: TransactionReference) => tx.hash) || [];
 
-  // Fetch details for all transactions in a single batch request
   const transactionDetailsKey = transactionHashes.length > 0 && wallet
     ? ['transaction-details', transactionHashes, rpcUrl]
     : null;
@@ -144,14 +140,11 @@ export function useTransactionHistory() {
     const finalTransactions: ProcessedTransaction[] = [];
     const processedHashes = new Set<string>();
 
-    // Helper function to parse amount consistently
     const parseAmount = (amountRaw: string | undefined): number => {
       const amountStr = String(amountRaw || '0');
-      // Handle amounts that are already in float format vs. micro-units
       return amountStr.includes('.') ? parseFloat(amountStr) : parseInt(amountStr) / 1_000_000;
     };
 
-    // a. Process confirmed transactions from fetched details
     if (transactionDetails?.length && addressData?.recent_transactions?.length) {
       transactionDetails.forEach((result: any) => {
         if (!result?.data?.parsed_tx) return;
@@ -171,13 +164,13 @@ export function useTransactionHistory() {
           type: isIncoming ? 'in' : 'out',
           ok: true,
           nonce: parsedTx.nonce,
-          epoch: txRef?.epoch
+          epoch: txRef?.epoch,
+          message: parsedTx.message || undefined,
         });
         processedHashes.add(hash);
       });
     }
 
-    // b. Process and add pending (staged) transactions
     if (stagingData?.staged_transactions) {
       const ourStagedTxs = stagingData.staged_transactions.filter(
         (tx: any) => tx.from === wallet.address && tx.hash && !processedHashes.has(tx.hash)
@@ -191,31 +184,26 @@ export function useTransactionHistory() {
           amount: parseAmount(stagedTx.amount_raw || stagedTx.amount),
           to: isIncoming ? stagedTx.from : stagedTx.to,
           type: isIncoming ? 'in' : 'out',
-          ok: true, // Assuming staged transactions are valid until proven otherwise
+          ok: true,
           nonce: stagedTx.nonce,
-          epoch: undefined, // Staged transactions do not have an epoch
+          epoch: undefined,
+          message: stagedTx.message || undefined,
         });
         processedHashes.add(stagedTx.hash);
       });
     }
 
-    // c. Sort by time (newest first) and limit the result set
     return finalTransactions
       .sort((a, b) => b.time.getTime() - a.time.getTime())
       .slice(0, 50);
-
-    // The dependency array for useMemo. The logic will only re-run if these data sources change.
   }, [wallet?.address, transactionDetails, addressData?.recent_transactions, stagingData]);
-
-
 
   const isLoading = addressLoading || detailsLoading;
   const error = addressError || detailsError;
 
-  // Handle the specific case where the address is not found (404) but we might still have staged transactions.
   if (addressError && addressError.message.includes('404')) {
     return {
-      history: processedTransactions, // Return staged transactions if any
+      history: processedTransactions,
       isLoading: false,
       error: null,
     };
@@ -232,6 +220,7 @@ interface SendTransactionParams {
   to: string;
   amount: number;
   _nonce?: number;
+  message?: string;
 }
 
 interface SendTransactionResult {
@@ -240,6 +229,7 @@ interface SendTransactionResult {
   error?: string;
   responseTime?: number;
   poolInfo?: any;
+  message?: string;
 }
 
 export function useSendTransaction() {
@@ -249,7 +239,7 @@ export function useSendTransaction() {
   const { mutate } = useSWRConfig();
   const rpcUrl = 'https://octra.network';
 
-  const sendTransaction = async ({ to, amount, _nonce }: SendTransactionParams): Promise<SendTransactionResult> => {
+  const sendTransaction = async ({ to, amount, _nonce, message }: SendTransactionParams): Promise<SendTransactionResult> => {
     if (!wallet) {
       return { success: false, error: 'Wallet not connected' };
     }
@@ -274,9 +264,13 @@ export function useSendTransaction() {
         amount: String(Math.floor(amount * 1_000_000)),
         nonce: _nonce ? _nonce : currentNonce + 1,
         ou: amount < 1000 ? "1" : "3",
-        timestamp: Date.now() / 1000 + Math.random() * 0.01
+        timestamp: Date.now() / 1000 + Math.random() * 0.01,
+        message: message || undefined,
       };
-      const transactionString = JSON.stringify(transaction, null, 0);
+      const signableData = { ...transaction };
+      delete signableData.message;
+      const transactionString = JSON.stringify(signableData, null, 0);
+      console.log('Signable Transaction:', signableData);
       const messageBytes = new TextEncoder().encode(transactionString);
       const signature = nacl.sign.detached(messageBytes, keyPair.secretKey);
       const signatureB64 = encodeBase64(signature);
@@ -284,10 +278,13 @@ export function useSendTransaction() {
       const signedTransaction = {
         ...transaction,
         signature: signatureB64,
-        public_key: publicKeyB64
+        public_key: publicKeyB64,
       };
+      console.log('Signed Transaction:', signedTransaction);
 
       const startTime = Date.now();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
       const response = await fetch('/api/proxy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -297,7 +294,9 @@ export function useSendTransaction() {
           rpcUrl: rpcUrl,
           payload: signedTransaction,
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       const responseTime = (Date.now() - startTime) / 1000;
       if (!response.ok) {
         const errorData = await response.json();
@@ -316,15 +315,11 @@ export function useSendTransaction() {
       }
 
       if (success && txHash) {
-
         const stagingKey = ['/staging', rpcUrl];
 
-        // Step 1: Manually update the staging data cache for an instant UI update.
         mutate(
           stagingKey,
           (currentData: any) => {
-            // Construct the new pending transaction object.
-            // Its structure should match what the /staging API would return.
             const newStagedTx = {
               from: wallet.address,
               to: to,
@@ -332,9 +327,9 @@ export function useSendTransaction() {
               nonce: currentNonce + 1,
               hash: txHash,
               timestamp: Date.now() / 1000,
+              message: message || undefined,
             };
 
-            // Prepend the new transaction to the existing list of staged transactions.
             const newStagingData = {
               ...(currentData || {}),
               staged_transactions: [
@@ -345,13 +340,9 @@ export function useSendTransaction() {
 
             return newStagingData;
           },
-          // Setting revalidate to false prevents an immediate refetch,
-          // allowing our optimistic update to be the source of truth for a moment.
           { revalidate: false }
         );
 
-        // Step 2: Trigger a revalidation for balance and nonce as before.
-        // This can happen in the background.
         if (wallet?.address) {
           mutate([`/balance/${wallet.address}`, rpcUrl]);
         }
@@ -361,7 +352,8 @@ export function useSendTransaction() {
           success: true,
           txHash,
           responseTime,
-          poolInfo: result.pool_info
+          poolInfo: result.pool_info,
+          message: message || undefined,
         };
       } else {
         setIsLoading(false);
@@ -371,7 +363,6 @@ export function useSendTransaction() {
           responseTime
         };
       }
-
     } catch (error) {
       setIsLoading(false);
       return {
