@@ -59,10 +59,12 @@ export function SendDialog({ children }: SendDialogProps) {
   };
 
   const handleOpenChange = (newOpen: boolean) => {
-    setOpen(newOpen);
-    if (!newOpen) {
-      setTimeout(resetDialog, 200);
+    if (newOpen) {
+      resetDialog(); // Reset state setiap kali dialog dibuka
+    } else {
+      setTimeout(resetDialog, 200); // Reset pas ditutup juga buat jaga-jaga
     }
+    setOpen(newOpen);
   };
 
   const handleRecipientChange = (index: number, field: keyof Recipient, value: string) => {
