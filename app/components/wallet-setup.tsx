@@ -169,7 +169,7 @@ Signature Valid: ${data.signature_valid}
               <CircleAlert className="w-5 h-5 mt-0.5 flex-shrink-0" />
               <div>
                 <p><strong>Note:</strong> This is <strong>NOT</strong> an official client.</p>
-                <p>The code is open source and available <Link className="underline" rel="noopener noreferrer" target="_blank" href="#">here</Link>. <strong>DYOR</strong></p>
+                <p>The code is open source and available <Link className="underline" rel="noopener noreferrer" target="_blank" href="https://github.com/robynasuro/non-official-octra-web-client-main">here</Link>. <strong>DYOR</strong></p>
               </div>
             </div>
           </CardContent>

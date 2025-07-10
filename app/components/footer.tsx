@@ -7,12 +7,12 @@ export function Footer() {
         <p>
           Made by{' '}
           <a
-            href="#"
+            href="https://github.com/robynasuro/non-official-octra-web-client-main"
             target="_blank"
             rel="noopener noreferrer"
             className="font-medium text-gray-400 hover:text-gray-200"
           >
-            @JOMOK
+            @0xcreamy
           </a>{' '}
           with ❤️
         </p>
